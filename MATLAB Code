@@ -1,64 +1,47 @@
-% Serial port configuration
-port = 'COM3'; % Change this to your base station's COM port
-baudrate = 115200;
-s = serialport(port, baudrate);
-configureTerminator(s, "LF");
+clear;
+clc;
+bt = serialport("COM3", 9600);
+configureTerminator(bt, "LF");
 
-% Reference point (change to your location)
 lat_sub0 = 7.214971;
 lon_sub0 = 124.248697;
-R = 6371000; % Earth radius in meters
+R = 6371000; 
 
-% Sample data points (replace with your actual data)
 pointx = [4.08, 7.54, 11.05, 14.60, 18.07, 21.95];
 pointy = [-2.97, -5.58, -8.25, -10.86, -13.47, -16.68];
 pointz = [-36.00, -37.09, -37.23, -36.37, -36.94, -39.57];
 
-% Create interpolation function
 F = scatteredInterpolant(pointx', pointy', pointz', 'linear', 'nearest');
 
-% Load FIS (Fuzzy Inference System)
-fis = readfis('sugenotype1.fis'); % Make sure this file is in your path
+fis = readfis('sugenotype1.fis');
 
 while true
-    % Read GPS data from serial port
-    if s.NumBytesAvailable > 0
-        data = readline(s);
-        
-        % Process GPS data
-        if startsWith(data, "GPS:")
-            parts = strsplit(data(5:end), ',');
-            if length(parts) == 4
-                lat = str2double(parts{1});
-                lon = str2double(parts{2});
-                
-                % Convert to local coordinates
-                lat0_rad = deg2rad(lat_sub0);
-                lon0_rad = deg2rad(lon_sub0);
-                clat_rad = deg2rad(lat);
-                clon_rad = deg2rad(lon);
-                
-                currentx = R * (clon_rad - lon0_rad) * cos(lat0_rad);
-                currenty = R * (clat_rad - lat0_rad);
-                currentz = F(currentx, currenty);
-                
-                % Evaluate fuzzy logic
-                output = evalfis(fis, [currentx, currenty, currentz]);
-                
-                % Send motor commands (format: CMD:left,right)
-                cmd = sprintf("CMD:%d,%d", output(1), output(2));
-                writeline(s, cmd);
-                disp(['Sent command: ' cmd]);
-            end
-        elseif strcmp(data, "GPS:LOST")
-            disp('GPS signal lost!');
-            % Send stop command
-            writeline(s, "CMD:0,0");
-        end
-    end
+    % Read GPS data from Arduino
+    data = readline(bt);
+    coords = split(data, ',');
     
-    pause(0.1); % Small delay to prevent CPU overload
+    if length(coords) == 2
+        currentlat = str2double(coords(1));
+        currentlon = str2double(coords(2));
+        
+        % Convert to radians
+        lat0_rad = deg2rad(lat_sub0);
+        lon0_rad = deg2rad(lon_sub0);
+        clat_rad = deg2rad(currentlat);
+        clon_rad = deg2rad(currentlon);
+        
+        currentx = R * (clon_rad - lon0_rad) * cos(lat0_rad);
+        currenty = R * (clat_rad - lat0_rad);
+        
+        currentz = F(currentx, currenty);
+        
+        currentAngle = 0; 
+        
+        output = evalfis(fis, [currentx, currenty, currentAngle]);
+        
+        command = sprintf("%d,%d", round(output(1)), round(output(2)));
+        writeline(bt, command);
+        
+        disp(['Sent command: ' command]);
+    end
 end
-
-% Cleanup
-clear s;
