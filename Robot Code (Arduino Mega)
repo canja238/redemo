@@ -7,17 +7,18 @@ TinyGPSPlus gps;
 // Motor pins
 const int ENA = 12;  // Enable pin for Motor A (PWM speed control)
 const int ENB = 13;  // Enable pin for Motor B (PWM speed control)
-const int motorPin1 = 8;  // Motor A direction pin 1
-const int motorPin2 = 9;  // Motor A direction pin 2
-const int motorPin3 = 11; // Motor B direction pin 1
-const int motorPin4 = 10; // Motor B direction pin 2
+const int motorPin1 = 8;   // Motor A direction pin 1
+const int motorPin2 = 9;   // Motor A direction pin 2
+const int motorPin3 = 11;  // Motor B direction pin 1
+const int motorPin4 = 10;  // Motor B direction pin 2
 
 void setup() {
-  Serial.begin(115200);  // For debugging
-  GPS_SERIAL.begin(9600);  // GPS module baud rate
-  BT_SERIAL.begin(9600);  // Bluetooth module baud rate
+  // Initialize serial communications
+  Serial.begin(9600);  // For debugging
+  GPS_SERIAL.begin(9600);  // GPS module
+  BT_SERIAL.begin(9600);   // Bluetooth module
   
-  // Set motor control pins as outputs
+  // Initialize motor control pins
   pinMode(ENA, OUTPUT);
   pinMode(ENB, OUTPUT);
   pinMode(motorPin1, OUTPUT);
@@ -25,8 +26,10 @@ void setup() {
   pinMode(motorPin3, OUTPUT);
   pinMode(motorPin4, OUTPUT);
   
-  // Initialize motors to stop
+  // Initially stop the motors
   stopMotors();
+  
+  Serial.println("System Initialized");
 }
 
 void loop() {
@@ -34,10 +37,16 @@ void loop() {
   while (GPS_SERIAL.available() > 0) {
     if (gps.encode(GPS_SERIAL.read())) {
       if (gps.location.isValid()) {
-        // Send GPS data to MATLAB
+        // Send GPS coordinates to MATLAB via Bluetooth
         BT_SERIAL.print(gps.location.lat(), 6);
         BT_SERIAL.print(",");
         BT_SERIAL.println(gps.location.lng(), 6);
+        
+        // For debugging
+        Serial.print("Sent GPS Data: ");
+        Serial.print(gps.location.lat(), 6);
+        Serial.print(", ");
+        Serial.println(gps.location.lng(), 6);
       }
     }
   }
@@ -45,52 +54,56 @@ void loop() {
   // Check for incoming motor commands from MATLAB
   if (BT_SERIAL.available() > 0) {
     String command = BT_SERIAL.readStringUntil('\n');
-    processMotorCommand(command);
-  }
-}
-
-void processMotorCommand(String command) {
-  // Expected format: "leftSpeed,rightSpeed"
-  int commaIndex = command.indexOf(',');
-  if (commaIndex != -1) {
-    int leftSpeed = command.substring(0, commaIndex).toInt();
-    int rightSpeed = command.substring(commaIndex + 1).toInt();
+    command.trim();
     
-    // Set motor speeds and directions
-    setMotorSpeed(leftSpeed, rightSpeed);
+    // Parse the command (format: "leftSpeed,rightSpeed")
+    int commaIndex = command.indexOf(',');
+    if (commaIndex > 0) {
+      int leftSpeed = command.substring(0, commaIndex).toInt();
+      int rightSpeed = command.substring(commaIndex + 1).toInt();
+      
+      // For debugging
+      Serial.print("Received Command: ");
+      Serial.print(leftSpeed);
+      Serial.print(", ");
+      Serial.println(rightSpeed);
+      
+      // Control motors based on the received command
+      controlMotors(leftSpeed, rightSpeed);
+    }
   }
 }
 
-void setMotorSpeed(int leftSpeed, int rightSpeed) {
-  // Left motor control
+void controlMotors(int leftSpeed, int rightSpeed) {
+  // Control left motor (Motor A)
   if (leftSpeed > 0) {
     digitalWrite(motorPin1, HIGH);
     digitalWrite(motorPin2, LOW);
+    analogWrite(ENA, leftSpeed);
   } else if (leftSpeed < 0) {
     digitalWrite(motorPin1, LOW);
     digitalWrite(motorPin2, HIGH);
-    leftSpeed = -leftSpeed;  // Make speed positive
+    analogWrite(ENA, -leftSpeed);
   } else {
     digitalWrite(motorPin1, LOW);
     digitalWrite(motorPin2, LOW);
+    analogWrite(ENA, 0);
   }
   
-  // Right motor control
+  // Control right motor (Motor B)
   if (rightSpeed > 0) {
     digitalWrite(motorPin3, HIGH);
     digitalWrite(motorPin4, LOW);
+    analogWrite(ENB, rightSpeed);
   } else if (rightSpeed < 0) {
     digitalWrite(motorPin3, LOW);
     digitalWrite(motorPin4, HIGH);
-    rightSpeed = -rightSpeed;  // Make speed positive
+    analogWrite(ENB, -rightSpeed);
   } else {
     digitalWrite(motorPin3, LOW);
     digitalWrite(motorPin4, LOW);
+    analogWrite(ENB, 0);
   }
-  
-  // Set PWM speeds (0-255)
-  analogWrite(ENA, leftSpeed);
-  analogWrite(ENB, rightSpeed);
 }
 
 void stopMotors() {
