@@ -56,34 +56,34 @@ void loop() {
     String command = BT_SERIAL.readStringUntil('\n');
     command.trim();
     
-    // Parse the command (format: "leftSpeed,rightSpeed")
+    // Parse the command (format: "YL,YR")
     int commaIndex = command.indexOf(',');
     if (commaIndex > 0) {
-      int leftSpeed = command.substring(0, commaIndex).toInt();
-      int rightSpeed = command.substring(commaIndex + 1).toInt();
+      int YL = command.substring(0, commaIndex).toInt();
+      int YR = command.substring(commaIndex + 1).toInt();
       
       // For debugging
       Serial.print("Received Command: ");
-      Serial.print(leftSpeed);
+      Serial.print(YL);
       Serial.print(", ");
-      Serial.println(rightSpeed);
+      Serial.println(YR);
       
       // Control motors based on the received command
-      controlMotors(leftSpeed, rightSpeed);
+      controlMotors(YL, YR);
     }
   }
 }
 
-void controlMotors(int leftSpeed, int rightSpeed) {
+void controlMotors(int YL, int YR) {
   // Control left motor (Motor A)
-  if (leftSpeed > 0) {
+  if (YL > 0) {
     digitalWrite(motorPin1, HIGH);
     digitalWrite(motorPin2, LOW);
-    analogWrite(ENA, leftSpeed);
-  } else if (leftSpeed < 0) {
+    analogWrite(ENA, YL);
+  } else if (YL < 0) {
     digitalWrite(motorPin1, LOW);
     digitalWrite(motorPin2, HIGH);
-    analogWrite(ENA, -leftSpeed);
+    analogWrite(ENA, -YL);
   } else {
     digitalWrite(motorPin1, LOW);
     digitalWrite(motorPin2, LOW);
@@ -91,14 +91,14 @@ void controlMotors(int leftSpeed, int rightSpeed) {
   }
   
   // Control right motor (Motor B)
-  if (rightSpeed > 0) {
+  if (YR > 0) {
     digitalWrite(motorPin3, HIGH);
     digitalWrite(motorPin4, LOW);
-    analogWrite(ENB, rightSpeed);
-  } else if (rightSpeed < 0) {
+    analogWrite(ENB, YR);
+  } else if (YR < 0) {
     digitalWrite(motorPin3, LOW);
     digitalWrite(motorPin4, HIGH);
-    analogWrite(ENB, -rightSpeed);
+    analogWrite(ENB, -YR);
   } else {
     digitalWrite(motorPin3, LOW);
     digitalWrite(motorPin4, LOW);
