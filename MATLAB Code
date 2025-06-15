@@ -1,47 +1,109 @@
 clear;
 clc;
+
+% Establish Bluetooth connection
+delete(instrfindall);
 bt = serialport("COM3", 9600);
 configureTerminator(bt, "LF");
 
-lat_sub0 = 7.214971;
-lon_sub0 = 124.248697;
-R = 6371000; 
+% To power up gyro and stabilize the gimbal
+pause(1);
 
-pointx = [4.08, 7.54, 11.05, 14.60, 18.07, 21.95];
-pointy = [-2.97, -5.58, -8.25, -10.86, -13.47, -16.68];
-pointz = [-36.00, -37.09, -37.23, -36.37, -36.94, -39.57];
+% Reference coordinates
+latRef = 7.214971;
+longRef = 124.248697;
+R = 6371000; % Earth's radius in meters
 
-F = scatteredInterpolant(pointx', pointy', pointz', 'linear', 'nearest');
+% Desired trajectory points
+desiredX = [4.08, 7.54, 11.05, 14.60, 18.07, 21.95];
+desiredY = [-2.97, -5.58, -8.25, -10.86, -13.47, -16.68];
+desiredTheta = [-36.00, -37.09, -37.23, -36.37, -36.94, -39.57];
 
+% Create interpolant for depth (z) values
+F = scatteredInterpolant(desiredX', desiredY', desiredTheta', 'linear', 'nearest');
+
+% Load fuzzy inference system
 fis = readfis('sugenotype1.fis');
 
-while true
-    % Read GPS data from Arduino
-    data = readline(bt);
-    coords = split(data, ',');
+% Main Loop
+for outerLoop = 1:70
+    % Clear serial I/O Buffer
+    flush(bt, "output");
+    flush(bt, "input");
     
-    if length(coords) == 2
-        currentlat = str2double(coords(1));
-        currentlon = str2double(coords(2));
+    for innerLoop = 1:100
+        tic;
         
-        % Convert to radians
-        lat0_rad = deg2rad(lat_sub0);
-        lon0_rad = deg2rad(lon_sub0);
-        clat_rad = deg2rad(currentlat);
-        clon_rad = deg2rad(currentlon);
+        % Read GPS data from Arduino
+        try
+            data = readline(bt);
+            coords = split(data, ',');
+            
+            if length(coords) >= 2
+                currentLat = str2double(coords(1));
+                currentLong = str2double(coords(2));
+                
+                % Check if GPS data is valid
+                if isnan(currentLat) || isnan(currentLong)
+                    error('Invalid GPS data received');
+                end
+                
+                % Convert to radians
+                latRef_rad = deg2rad(latRef);
+                currentLat_rad = deg2rad(currentLat);
+                currentLong_rad = deg2rad(currentLong);
+                
+                % Calculate delta coordinates
+                deltaLat = currentLat - latRef;
+                deltaLong = currentLong - longRef;
+                
+                % Convert to local x,y coordinates
+                currentX = deltaLong * cos(latRef_rad) * (pi/180) * R;
+                currentY = deltaLat * (pi/180) * R;
+                currentTheta = atan2(currentY, currentX);
+                
+                % Find nearest desired point
+                [~, index] = min(sqrt((desiredX - currentX).^2 + (desiredY - currentY).^2));
+                
+                % Calculate errors
+                xError = desiredX(index) - currentX;
+                yError = desiredY(index) - currentY;
+                thetaError = atan2(yError, xError) - currentTheta;
+                
+                % Normalize theta error to [-pi, pi]
+                thetaError = atan2(sin(thetaError), cos(thetaError));
+                
+                % Convert theta error to degrees for fuzzy system
+                thetaError_deg = rad2deg(thetaError);
+                
+                % Evaluate fuzzy logic system
+                output = evalfis(fis, [xError, yError, thetaError_deg]);
+                YL = round(output(1));  % Left motor output
+                YR = round(output(2));  % Right motor output
+                
+                % Send motor commands to Arduino
+                command = sprintf("%d,%d", YL, YR);
+                writeline(bt, command);
+                
+                % Display data
+                dispData = ['X: ', num2str(currentX), ' Y: ', num2str(currentY), ...
+                           ' Xerr: ', num2str(xError), ' Yerr: ', num2str(yError), ...
+                           ' ThetaErr: ', num2str(thetaError_deg), ...
+                           ' YL: ', num2str(YL), ' YR: ', num2str(YR)];
+                disp(dispData);
+            else
+                error('Incomplete GPS data received');
+            end
+        catch ME
+            disp(['Error: ' ME.message]);
+            continue;  % Skip this iteration if there's an error
+        end
         
-        currentx = R * (clon_rad - lon0_rad) * cos(lat0_rad);
-        currenty = R * (clat_rad - lat0_rad);
-        
-        currentz = F(currentx, currenty);
-        
-        currentAngle = 0; 
-        
-        output = evalfis(fis, [currentx, currenty, currentAngle]);
-        
-        command = sprintf("%d,%d", round(output(1)), round(output(2)));
-        writeline(bt, command);
-        
-        disp(['Sent command: ' command]);
+        % Pause for timing
+        pause(0.5);
+        elapsedTime = toc;
     end
 end
+
+% Clean up
+clear bt;
