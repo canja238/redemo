@@ -1,0 +1,47 @@
+clear;
+clc;
+bt = serialport("COM3", 9600);
+configureTerminator(bt, "LF");
+
+lat_sub0 = 7.214971;
+lon_sub0 = 124.248697;
+R = 6371000; 
+
+pointx = [4.08, 7.54, 11.05, 14.60, 18.07, 21.95];
+pointy = [-2.97, -5.58, -8.25, -10.86, -13.47, -16.68];
+pointz = [-36.00, -37.09, -37.23, -36.37, -36.94, -39.57];
+
+F = scatteredInterpolant(pointx', pointy', pointz', 'linear', 'nearest');
+
+fis = readfis('sugenotype1.fis');
+
+while true
+    % Read GPS data from Arduino
+    data = readline(bt);
+    coords = split(data, ',');
+    
+    if length(coords) == 2
+        currentlat = str2double(coords(1));
+        currentlon = str2double(coords(2));
+        
+        % Convert to radians
+        lat0_rad = deg2rad(lat_sub0);
+        lon0_rad = deg2rad(lon_sub0);
+        clat_rad = deg2rad(currentlat);
+        clon_rad = deg2rad(currentlon);
+        
+        currentx = R * (clon_rad - lon0_rad) * cos(lat0_rad);
+        currenty = R * (clat_rad - lat0_rad);
+        
+        currentz = F(currentx, currenty);
+        
+        currentAngle = 0; 
+        
+        output = evalfis(fis, [currentx, currenty, currentAngle]);
+        
+        command = sprintf("%d,%d", round(output(1)), round(output(2)));
+        writeline(bt, command);
+        
+        disp(['Sent command: ' command]);
+    end
+end
