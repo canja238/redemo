@@ -1,0 +1,69 @@
+[System]
+Name='sugenotype1'
+Type='sugeno'
+Version=2.0
+NumInputs=3
+NumOutputs=2
+NumRules=0
+AndMethod='prod'
+OrMethod='probor'
+ImpMethod='prod'
+AggMethod='sum'
+DefuzzMethod='wtaver'
+
+[Input1]
+Name='x'
+Range=[-5 5]
+NumMFs=3
+MF1='N':'trimf',[-5 -2.5 0]
+MF2='Z':'trimf',[-2.5 0 2.5]
+MF3='P':'trimf',[0 2.5 5]
+
+[Input2]
+Name='y'
+Range=[-5 5]
+NumMFs=3
+MF1='N':'trimf',[-5 -2.5 0]
+MF2='Z':'trimf',[-2.5 0 2.5]
+MF3='P':'trimf',[0 2.5 5]
+
+[Input3]
+Name='Angle'
+Range=[-15 15]
+NumMFs=3
+MF1='N':'trimf',[-15 -7.5 0]
+MF2='Z':'trimf',[-7.5 0 7.5]
+MF3='P':'trimf',[0 7.5 15]
+
+[Output1]
+Name='yL'
+Range=[0 255]
+NumMFs=3
+MF1='STOP':'constant',[0]
+MF2='MODERATE':'constant',[127.5]
+MF3='FAST':'constant',[255]
+
+[Output2]
+Name='YR'
+Range=[0 255]
+NumMFs=3
+MF1='STOP':'constant',[0]
+MF2='MODERATE':'constant',[127.5]
+MF3='FAST':'constant',[255]
+
+[Rules]
+1 1 1, 1 1 (1) : 1
+1 1 2, 1 1 (1) : 1
+1 1 3, 1 1 (1) : 1
+2 2 1, 2 3 (1) : 1
+2 2 2, 2 2 (1) : 1
+2 2 3, 3 2 (1) : 1
+3 3 1, 2 3 (1) : 1
+3 3 2, 3 3 (1) : 1
+3 3 3, 3 2 (1) : 1
+2 3 1, 2 3 (1) : 1
+2 3 2, 3 3 (1) : 1
+2 3 3, 3 2 (1) : 1
+3 2 1, 2 3 (1) : 1
+3 2 2, 3 3 (1) : 1
+3 2 3, 3 2 (1) : 1
