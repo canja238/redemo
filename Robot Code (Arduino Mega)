@@ -12,6 +12,10 @@ const int motorPin2 = 9;   // Motor A direction pin 2
 const int motorPin3 = 11;  // Motor B direction pin 1
 const int motorPin4 = 10;  // Motor B direction pin 2
 
+// Function prototypes
+void controlMotors(int YL, int YR);
+void stopMotors();
+
 void setup() {
   // Initialize serial communications
   Serial.begin(9600);  // For debugging
