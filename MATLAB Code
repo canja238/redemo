@@ -1,116 +1,153 @@
-% Reference coordinates
-latRef = 7.214971;
-longRef = 124.248697;
-R = 6371000; % Earth's radius in meters
-
-% Desired trajectory points
-desiredX = [4.08, 7.54, 11.05, 14.60, 18.07, 21.95];
-desiredY = [-2.97, -5.58, -8.25, -10.86, -13.47, -16.68];
-desiredTheta = [-36.00, -37.09, -37.23, -36.37, -36.94, -39.57];
-
-% Create interpolant for depth (z) values
-F = scatteredInterpolant(desiredX', desiredY', desiredTheta', 'linear', 'nearest');
-
-% Load fuzzy inference system
-fis = readfis('sugenotype1.fis');
-
-% WiFi Connection Setup
-try
-    % Create a TCP/IP connection to ESP32
-    % Replace '192.168.4.1' with your ESP32's IP address
-    % Replace 1234 with the port number you've set on ESP32
-    t = tcpclient('192.168.4.1', 8080, 'Timeout', 5);
-    configureTerminator(t, "LF"); % Set line terminator
-    
-    % Test connection
-    write(t, "TEST");
-    response = readline(t);
-    if ~contains(response, "ACK")
-        error('Failed to establish proper connection with ESP32');
-    end
-    disp('WiFi connection established successfully');
-catch ME
-    error(['Failed to connect to ESP32: ' ME.message]);
-end
-
-% Main Loop
-for outerLoop = 1:70
-    % Clear serial I/O Buffer
-    flush(t);
-    
-    for innerLoop = 1:100
-        tic;
+classdef ESP32Navigator
+    properties
+        % Connection properties
+        tcpClient
+        ip = '192.168.4.1'
+        port = 1234
         
-        % Read GPS data from Arduino via ESP32
-        try
-            data = readline(t);
-            coords = split(data, ',');
+        % Navigation properties
+        latRef = 7.214971
+        longRef = 124.248697
+        R = 6371000 % Earth's radius in meters
+        
+        % Desired trajectory points
+        desiredX = [4.08, 7.54, 11.05, 14.60, 18.07, 21.95]
+        desiredY = [-2.97, -5.58, -8.25, -10.86, -13.47, -16.68]
+        desiredTheta = [-36.00, -37.09, -37.23, -36.37, -36.94, -39.57]
+        
+        % Systems
+        F % Interpolant
+        fis % Fuzzy inference system
+    end
+    
+    methods
+        function obj = ESP32Navigator()
+            % Initialize systems
+            obj.F = scatteredInterpolant(obj.desiredX', obj.desiredY', obj.desiredTheta', 'linear', 'nearest');
+            obj.fis = readfis('sugenotype1.fis');
             
-            if length(coords) >= 2
-                currentLat = str2double(coords(1));
-                currentLong = str2double(coords(2));
-                
-                % Check if GPS data is valid
-                if isnan(currentLat) || isnan(currentLong)
-                    error('Invalid GPS data received');
-                end
-                
-                % Convert to radians
-                latRef_rad = deg2rad(latRef);
-                currentLat_rad = deg2rad(currentLat);
-                currentLong_rad = deg2rad(currentLong);
-                
-                % Calculate delta coordinates
-                deltaLat = currentLat - latRef;
-                deltaLong = currentLong - longRef;
-                
-                % Convert to local x,y coordinates
-                currentX = deltaLong * cos(latRef_rad) * (pi/180) * R;
-                currentY = deltaLat * (pi/180) * R;
-                currentTheta = atan2(currentY, currentX);
-                
-                % Find nearest desired point
-                [~, index] = min(sqrt((desiredX - currentX).^2 + (desiredY - currentY).^2));
-                
-                % Calculate errors
-                xError = desiredX(index) - currentX;
-                yError = desiredY(index) - currentY;
-                thetaError = atan2(yError, xError) - currentTheta;
-                
-                % Normalize theta error to [-pi, pi]
-                thetaError = atan2(sin(thetaError), cos(thetaError));
-                
-                % Convert theta error to degrees for fuzzy system
-                thetaError_deg = rad2deg(thetaError);
-                
-                % Evaluate fuzzy logic system
-                output = evalfis(fis, [xError, yError, thetaError_deg]);
-                YL = round(output(1));  % Left motor output
-                YR = round(output(2));  % Right motor output
-                
-                % Send motor commands to Arduino via ESP32
-                command = sprintf("%d,%d", YL, YR);
-                writeline(t, command);
-                
-                % Display data
-                dispData = ['X: ', num2str(currentX), ' Y: ', num2str(currentY), ...
-                           ' Xerr: ', num2str(xError), ' Yerr: ', num2str(yError), ...
-                           ' ThetaErr: ', num2str(thetaError_deg), ...
-                           ' YL: ', num2str(YL), ' YR: ', num2str(YR)];
-                disp(dispData);
-            else
-                error('Incomplete GPS data received');
-            end
-        catch ME
-            disp(['Error: ' ME.message]);
-            continue;  % Skip this iteration if there's an error
+            % Establish WiFi connection
+            fprintf('Connecting to ESP32 at %s:%d...\n', obj.ip, obj.port);
+            obj.tcpClient = tcpclient(obj.ip, obj.port, 'Timeout', 5);
+            configureTerminator(obj.tcpClient, "LF");
+            fprintf('Successfully connected!\n');
         end
         
-        % Pause for timing
-        pause(0.5);
-        elapsedTime = toc;
+        function delete(obj)
+            % Clean up connection
+            if ~isempty(obj.tcpClient) && isvalid(obj.tcpClient)
+                clear obj.tcpClient;
+                fprintf('Connection closed\n');
+            end
+        end
+        
+        function runNavigation(obj, outerLoops, innerLoops)
+            % Main navigation loop
+            for outerLoop = 1:outerLoops
+                fprintf('Outer loop %d/%d\n', outerLoop, outerLoops);
+                
+                % Clear buffers
+                flush(obj.tcpClient);
+                
+                for innerLoop = 1:innerLoops
+                    tic;
+                    fprintf('  Inner loop %d/%d - ', innerLoop, innerLoops);
+                    
+                    try
+                        % Get GPS data
+                        [currentX, currentY] = obj.getPosition();
+                        
+                        % Navigation logic
+                        [WL, WR] = obj.calculateMotorOutputs(currentX, currentY);
+                        
+                        % Send commands
+                        obj.sendMotorCommand(WL, WR);
+                        
+                        % Display status
+                        fprintf('X:%.2f Y:%.2f WL:%d WR:%d\n', ...
+                                currentX, currentY, WL, WR);
+                        
+                    catch ME
+                        fprintf('Error: %s\n', ME.message);
+                        continue;
+                    end
+                    
+                    % Maintain timing
+                    elapsed = toc;
+                    pause(max(0, 0.5 - elapsed));
+                end
+            end
+        end
+        
+        function [currentX, currentY] = getPosition(obj)
+            % Request and parse GPS data
+            writeline(obj.tcpClient, "GPS");
+            data = readline(obj.tcpClient);
+            coords = split(data, ',');
+            
+            if length(coords) < 2
+                error('Incomplete GPS data');
+            end
+            
+            currentLat = str2double(coords(1));
+            currentLong = str2double(coords(2));
+            
+            if isnan(currentLat) || isnan(currentLong)
+                error('Invalid GPS data');
+            end
+            
+            % Convert to local coordinates
+            [currentX, currentY] = obj.convertToLocal(currentLat, currentLong);
+        end
+        
+        function [WL, WR] = calculateMotorOutputs(obj, currentX, currentY)
+            % Find nearest desired point
+            [~, idx] = min(sqrt((obj.desiredX - currentX).^2 + (obj.desiredY - currentY).^2));
+            
+            % Calculate errors
+            xError = obj.desiredX(idx) - currentX;
+            yError = obj.desiredY(idx) - currentY;
+            currentTheta = atan2(currentY, currentX);
+            thetaError = atan2(yError, xError) - currentTheta;
+            thetaError = atan2(sin(thetaError), cos(thetaError));
+            
+            % Fuzzy logic control
+            output = evalfis(obj.fis, [xError, yError, rad2deg(thetaError)]);
+            WL = round(output(1));
+            WR = round(output(2));
+        end
+        
+        function sendMotorCommand(obj, WL, WR)
+            % Send motor commands
+            command = sprintf("MOTOR,%d,%d", WL, WR);
+            writeline(obj.tcpClient, command);
+        end
+        
+        function [x, y] = convertToLocal(obj, lat, long)
+            % Convert GPS to local coordinates
+            latRef_rad = deg2rad(obj.latRef);
+            deltaLat = lat - obj.latRef;
+            deltaLong = long - obj.longRef;
+            
+            x = deltaLong * cos(latRef_rad) * (pi/180) * obj.R;
+            y = deltaLat * (pi/180) * obj.R;
+        end
     end
 end
 
-% Clean up
-clear t;
+% Main execution
+function main()
+    try
+        % Create navigator instance
+        nav = ESP32Navigator();
+        
+        % Run navigation (reduced loops for testing)
+        nav.runNavigation(2, 5); % Original was (70, 100)
+        
+    catch ME
+        fprintf('Error: %s\n', ME.message);
+    end
+    
+    % Clean up (automatic when 'nav' is cleared)
+end
+
