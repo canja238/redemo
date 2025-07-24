@@ -115,11 +115,11 @@ classdef ESP32Navigator
             output = evalfis(obj.fis, [xError, yError, rad2deg(thetaError)]);
             WL = round(output(1));
             WR = round(output(2));
-        end 
+        end
         
         function sendMotorCommand(obj, WL, WR)
             % Send motor commands
-            command = sprintf("MOTOR,%d,%d", WL, WR);
+            command = sprintf("%d,%d", WL, WR);
             writeline(obj.tcpClient, command);
         end
         
