@@ -1,0 +1,93 @@
+// Complete ESP32 WiFi Diagnostic Tool for Arduino Mega
+// Uses Serial3 (TX3/RX3) at 115200 baud
+
+#define DEBUG Serial      // USB Serial Monitor
+#define ESP32 Serial3     // Hardware Serial3 for ESP32
+#define BAUD_RATE 115200
+
+void setup() {
+  DEBUG.begin(BAUD_RATE);
+  ESP32.begin(BAUD_RATE);
+  delay(2000);  // Wait for ESP32 boot
+  
+  DEBUG.println("\n\nESP32 WiFi Diagnostic Tool");
+  DEBUG.println("=========================");
+  
+  // 1. Basic AT Test
+  DEBUG.println("\n[1] Testing basic communication...");
+  sendATCommand("AT", 2000);
+  
+  // 2. Check Firmware Version
+  DEBUG.println("\n[2] Checking firmware...");
+  sendATCommand("AT+GMR", 2000);
+  
+  // 3. Test WiFi Modes
+  DEBUG.println("\n[3] Testing WiFi modes...");
+  testWifiModes();
+  
+  // 4. Full Network Scan
+  DEBUG.println("\n[4] Scanning networks...");
+  sendATCommand("AT+CWLAP", 10000);  // Extended timeout
+  
+  // 5. IP Address Test
+  DEBUG.println("\n[5] Checking IP configuration...");
+  sendATCommand("AT+CIFSR", 2000);
+  
+  DEBUG.println("\nDiagnostic complete. Check results above.");
+}
+
+void loop() {
+  // Manual command mode
+  if (DEBUG.available()) {
+    String cmd = DEBUG.readStringUntil('\n');
+    cmd.trim();
+    if (cmd.length() > 0) {
+      DEBUG.println("Sending: " + cmd);
+      sendATCommand(cmd, 5000);
+    }
+  }
+}
+
+void testWifiModes() {
+  // Test all WiFi modes (1=Station, 2=AP, 3=Both)
+  for (int mode = 1; mode <= 3; mode++) {
+    String modeCmd = "AT+CWMODE=" + String(mode);
+    DEBUG.print("\nTesting Mode ");
+    DEBUG.print(mode);
+    DEBUG.println("...");
+    
+    sendATCommand(modeCmd, 2000);
+    sendATCommand("AT+CWMODE?", 1000);
+    
+    // Special tests for each mode
+    switch(mode) {
+      case 1:  // Station mode
+        sendATCommand("AT+CWJAP?", 2000);  // Check connection status
+        break;
+      case 2:  // AP mode
+        sendATCommand("AT+CWSAP?", 2000);  // Check AP settings
+        break;
+    }
+  }
+}
+
+void sendATCommand(String cmd, unsigned long timeout) {
+  DEBUG.print(">>> ");
+  DEBUG.println(cmd);
+  ESP32.println(cmd);
+  
+  unsigned long start = millis();
+  String response = "";
+  
+  while (millis() - start < timeout) {
+    while (ESP32.available()) {
+      char c = ESP32.read();
+      response += c;
+      if (c == '\n') {
+        DEBUG.print("<<< ");
+        DEBUG.print(response);
+        response = "";
+      }
+    }
+  }
+}
