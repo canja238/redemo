@@ -1,28 +1,26 @@
 #include <TinyGPS++.h>
 
 TinyGPSPlus gps;
-#define GPS_SERIAL Serial1
-#define ESP_SERIAL Serial3  // Changed from BT_SERIAL to ESP_SERIAL
+#define GPS_SERIAL Serial1  // GPS on Serial1 (Mega pins 18/19)
+#define ESP_SERIAL Serial3  // ESP32 connected to Mega's Serial3 (pins 14/15)
 
-// Motor pins
-const int ENA = 12;  // Enable pin for Motor A (PWM speed control)
-const int ENB = 13;  // Enable pin for Motor B (PWM speed control)
+// Motor pins (Mega pins, unchanged)
+const int ENA = 12;  // Enable pin for Motor A (PWM)
+const int ENB = 13;  // Enable pin for Motor B (PWM)
 const int motorPin1 = 8;   // Motor A direction pin 1
 const int motorPin2 = 9;   // Motor A direction pin 2
 const int motorPin3 = 11;  // Motor B direction pin 1
 const int motorPin4 = 10;  // Motor B direction pin 2
 
-// Function prototypes
 void controlMotors(int YL, int YR);
 void stopMotors();
 
 void setup() {
-  // Initialize serial communications
-  Serial.begin(115200);  // For debugging
-  GPS_SERIAL.begin(115200);  // GPS module
-  ESP_SERIAL.begin(115200);   // ESP-01 typically uses 115200 baud
-  
-  // Initialize motor control pins
+  Serial.begin(115200);      // Debug serial
+  GPS_SERIAL.begin(115200);  // GPS on Serial1
+  ESP_SERIAL.begin(115200);  // ESP32 on Serial3 (115200 baud)
+
+  // Initialize motor pins
   pinMode(ENA, OUTPUT);
   pinMode(ENB, OUTPUT);
   pinMode(motorPin1, OUTPUT);
@@ -30,89 +28,49 @@ void setup() {
   pinMode(motorPin3, OUTPUT);
   pinMode(motorPin4, OUTPUT);
   
-  // Initially stop the motors
   stopMotors();
-  
-  Serial.println("System Initialized");
-  
-  // Optional: Send AT command to check ESP-01 connection
-  ESP_SERIAL.println("AT");
-  delay(1000);
-  if (ESP_SERIAL.available()) {
-    String response = ESP_SERIAL.readString();
-    Serial.println("ESP-01 Response: " + response);
-  }
+  Serial.println("Mega + ESP32 Initialized");
 }
 
 void loop() {
-  // Read GPS data
+  // Read GPS data and send to ESP32
   while (GPS_SERIAL.available() > 0) {
     if (gps.encode(GPS_SERIAL.read())) {
       if (gps.location.isValid()) {
-        // Send GPS coordinates to server via ESP-01
         String gpsData = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6);
-        ESP_SERIAL.println(gpsData);  // Send as plain text
-        
-        // For debugging
+        ESP_SERIAL.println(gpsData);  // Send to ESP32 via Serial3
         Serial.print("Sent GPS Data: ");
         Serial.println(gpsData);
       }
     }
   }
-  
-  // Check for incoming motor commands from server via ESP-01
+
+  // Check for motor commands from ESP32
   if (ESP_SERIAL.available() > 0) {
     String command = ESP_SERIAL.readStringUntil('\n');
     command.trim();
-    
-    // Parse the command (format: "YL,YR")
     int commaIndex = command.indexOf(',');
     if (commaIndex > 0) {
       int YL = command.substring(0, commaIndex).toInt();
       int YR = command.substring(commaIndex + 1).toInt();
-      
-      // For debugging
       Serial.print("Received Command: ");
-      Serial.print(YL);
-      Serial.print(", ");
-      Serial.println(YR);
-      
-      // Control motors based on the received command
+      Serial.print(YL); Serial.print(", "); Serial.println(YR);
       controlMotors(YL, YR);
     }
   }
 }
 
+// Motor control functions (unchanged)
 void controlMotors(int YL, int YR) {
-  // Control left motor (Motor A)
-  if (YL > 0) {
-    digitalWrite(motorPin1, HIGH);
-    digitalWrite(motorPin2, LOW);
-    analogWrite(ENA, YL);
-  } else if (YL < 0) {
-    digitalWrite(motorPin1, LOW);
-    digitalWrite(motorPin2, HIGH);
-    analogWrite(ENA, -YL);
-  } else {
-    digitalWrite(motorPin1, LOW);
-    digitalWrite(motorPin2, LOW);
-    analogWrite(ENA, 0);
-  }
-  
-  // Control right motor (Motor B)
-  if (YR > 0) {
-    digitalWrite(motorPin3, HIGH);
-    digitalWrite(motorPin4, LOW);
-    analogWrite(ENB, YR);
-  } else if (YR < 0) {
-    digitalWrite(motorPin3, LOW);
-    digitalWrite(motorPin4, HIGH);
-    analogWrite(ENB, -YR);
-  } else {
-    digitalWrite(motorPin3, LOW);
-    digitalWrite(motorPin4, LOW);
-    analogWrite(ENB, 0);
-  }
+  // Left motor (Motor A)
+  digitalWrite(motorPin1, YL > 0 ? HIGH : LOW);
+  digitalWrite(motorPin2, YL < 0 ? HIGH : LOW);
+  analogWrite(ENA, abs(YL));
+
+  // Right motor (Motor B)
+  digitalWrite(motorPin3, YR > 0 ? HIGH : LOW);
+  digitalWrite(motorPin4, YR < 0 ? HIGH : LOW);
+  analogWrite(ENB, abs(YR));
 }
 
 void stopMotors() {
