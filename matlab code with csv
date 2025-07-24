@@ -1,0 +1,164 @@
+% Autonomous Vehicle Navigation System
+% with GPS Tracking, Fuzzy Logic Control, and Data Logging
+
+%% Initialization
+clear; clc; close all;
+
+% Reference coordinates (Philippines example)
+latRef = 7.214971;       % Reference latitude
+longRef = 124.248697;    % Reference longitude
+R = 6371000;            % Earth's radius in meters
+
+% Desired trajectory points (x,y,theta)
+desiredX = [4.08, 7.54, 11.05, 14.60, 18.07, 21.95];
+desiredY = [-2.97, -5.58, -8.25, -10.86, -13.47, -16.68];
+desiredTheta = [-36.00, -37.09, -37.23, -36.37, -36.94, -39.57];
+
+% Create interpolant for orientation
+F = scatteredInterpolant(desiredX', desiredY', desiredTheta', 'linear', 'nearest');
+
+% Load fuzzy inference system
+fis = readfis('sugenotype1.fis');
+
+%% WiFi Connection Setup
+try
+    % Create TCP/IP connection to ESP32
+    t = tcpclient('192.168.4.1', 8080, 'Timeout', 5);
+    configureTerminator(t, "LF"); % Set line terminator
+    
+    % Test connection
+    write(t, "TEST");
+    response = readline(t);
+    if ~contains(response, "ACK")
+        error('Failed to establish proper connection with ESP32');
+    end
+    disp('WiFi connection established successfully');
+catch ME
+    error(['Failed to connect to ESP32: ' ME.message]);
+end
+
+%% Data Logging Setup
+logFile = 'navigation_log.csv';
+fid = fopen(logFile, 'a');
+
+% Write CSV header if file is empty
+if ftell(fid) == 0
+    fprintf(fid, ['Timestamp,CurrentLat,CurrentLong,CurrentX,CurrentY,'...
+                 'DesiredX,DesiredY,XError,YError,ThetaError,YL,YR\n']);
+end
+
+%% Main Control Loop
+try
+    for outerLoop = 1:70
+        flush(t); % Clear serial buffer
+        
+        for innerLoop = 1:100
+            tic;
+            timestamp = datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS');
+            
+            try
+                %% GPS Data Processing
+                data = readline(t);
+                coords = split(data, ',');
+                
+                if length(coords) >= 2
+                    currentLat = str2double(coords(1));
+                    currentLong = str2double(coords(2));
+                    
+                    % Validate GPS data
+                    if isnan(currentLat) || isnan(currentLong)
+                        error('Invalid GPS coordinates received');
+                    end
+                    
+                    %% Coordinate Conversion
+                    % Convert to radians
+                    latRef_rad = deg2rad(latRef);
+                    currentLat_rad = deg2rad(currentLat);
+                    currentLong_rad = deg2rad(currentLong);
+                    
+                    % Calculate local coordinates (meters)
+                    deltaLat = currentLat - latRef;
+                    deltaLong = currentLong - longRef;
+                    currentX = deltaLong * cos(latRef_rad) * (pi/180) * R;
+                    currentY = deltaLat * (pi/180) * R;
+                    currentTheta = atan2(currentY, currentX);
+                    
+                    %% Trajectory Tracking
+                    % Find nearest desired point
+                    distances = sqrt((desiredX - currentX).^2 + (desiredY - currentY).^2);
+                    [~, index] = min(distances);
+                    
+                    targetX = desiredX(index);
+                    targetY = desiredY(index);
+                    
+                    % Calculate errors
+                    xError = targetX - currentX;
+                    yError = targetY - currentY;
+                    thetaError = atan2(yError, xError) - currentTheta;
+                    
+                    % Normalize angle to [-pi, pi]
+                    thetaError = atan2(sin(thetaError), cos(thetaError));
+                    thetaError_deg = rad2deg(thetaError);
+                    
+                    %% Fuzzy Logic Control
+                    output = evalfis(fis, [xError, yError, thetaError_deg]);
+                    YL = round(output(1));  % Left motor output
+                    YR = round(output(2));  % Right motor output
+                    
+                    % Ensure outputs are within valid PWM range
+                    YL = max(min(YL, 255), -255);
+                    YR = max(min(YR, 255), -255);
+                    
+                    %% Send Commands to Vehicle
+                    command = sprintf("%d,%d", YL, YR);
+                    writeline(t, command);
+                    
+                    %% Data Logging
+                    fprintf(fid, '%s,%f,%f,%f,%f,%f,%f,%f,%f,%f,%d,%d\n', ...
+                            char(timestamp), currentLat, currentLong, ...
+                            currentX, currentY, targetX, targetY, ...
+                            xError, yError, thetaError_deg, YL, YR);
+                    
+                    %% Display Status
+                    disp(['Position: (', num2str(currentX, '%.2f'), ', ', ...
+                          num2str(currentY, '%.2f'), ') m | Errors: X=', ...
+                          num2str(xError, '%.2f'), ' Y=', num2str(yError, '%.2f'), ...
+                          ' θ=', num2str(thetaError_deg, '%.1f'), '° | Motors: ', ...
+                          num2str(YL), ',', num2str(YR)]);
+                    
+                else
+                    error('Incomplete GPS data received');
+                end
+                
+            catch ME
+                % Log errors but continue execution
+                fprintf(fid, '%s,ERROR,,,,,,,,,%s\n', char(timestamp), ME.message);
+                disp(['Error: ' ME.message]);
+            end
+            
+            %% Timing Control
+            elapsed = toc;
+            if elapsed < 0.5
+                pause(0.5 - elapsed); % Maintain ~2Hz update rate
+            else
+                warning('Loop iteration took too long: %.2f seconds', elapsed);
+            end
+        end
+        
+        % Rotate log file every 10 outer loops (optional)
+        if mod(outerLoop, 10) == 0
+            fclose(fid);
+            movefile(logFile, sprintf('navlog_%s.csv', ...
+                    datestr(now, 'yyyymmdd_HHMMSS')));
+            fid = fopen(logFile, 'a');
+        end
+    end
+    
+catch ME
+    disp(['Fatal error: ' ME.message]);
+end
+
+%% Cleanup
+fclose(fid);
+clear t;
+disp('Navigation completed and resources released');
