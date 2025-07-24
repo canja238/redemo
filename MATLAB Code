@@ -1,14 +1,3 @@
-clear;
-clc;
-
-% Establish Bluetooth connection
-delete(instrfindall);
-bt = serialport("COM3", 9600);
-configureTerminator(bt, "LF");
-
-% To power up gyro and stabilize the gimbal
-pause(1);
-
 % Reference coordinates
 latRef = 7.214971;
 longRef = 124.248697;
@@ -25,18 +14,36 @@ F = scatteredInterpolant(desiredX', desiredY', desiredTheta', 'linear', 'nearest
 % Load fuzzy inference system
 fis = readfis('sugenotype1.fis');
 
+% WiFi Connection Setup
+try
+    % Create a TCP/IP connection to ESP32
+    % Replace '192.168.4.1' with your ESP32's IP address
+    % Replace 1234 with the port number you've set on ESP32
+    t = tcpclient('192.168.4.1', 8080, 'Timeout', 5);
+    configureTerminator(t, "LF"); % Set line terminator
+    
+    % Test connection
+    write(t, "TEST");
+    response = readline(t);
+    if ~contains(response, "ACK")
+        error('Failed to establish proper connection with ESP32');
+    end
+    disp('WiFi connection established successfully');
+catch ME
+    error(['Failed to connect to ESP32: ' ME.message]);
+end
+
 % Main Loop
 for outerLoop = 1:70
     % Clear serial I/O Buffer
-    flush(bt, "output");
-    flush(bt, "input");
+    flush(t);
     
     for innerLoop = 1:100
         tic;
         
-        % Read GPS data from Arduino
+        % Read GPS data from Arduino via ESP32
         try
-            data = readline(bt);
+            data = readline(t);
             coords = split(data, ',');
             
             if length(coords) >= 2
@@ -81,9 +88,9 @@ for outerLoop = 1:70
                 YL = round(output(1));  % Left motor output
                 YR = round(output(2));  % Right motor output
                 
-                % Send motor commands to Arduino
+                % Send motor commands to Arduino via ESP32
                 command = sprintf("%d,%d", YL, YR);
-                writeline(bt, command);
+                writeline(t, command);
                 
                 % Display data
                 dispData = ['X: ', num2str(currentX), ' Y: ', num2str(currentY), ...
@@ -106,4 +113,4 @@ for outerLoop = 1:70
 end
 
 % Clean up
-clear bt;
+clear t;
