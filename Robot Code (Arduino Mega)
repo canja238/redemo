@@ -12,7 +12,7 @@ const int motorPin2 = 9;   // Motor A direction pin 2
 const int motorPin3 = 11;  // Motor B direction pin 1
 const int motorPin4 = 10;  // Motor B direction pin 2
 
-void controlMotors(int YL, int YR);
+void controlMotors(int WL, int WR);
 void stopMotors();
 
 void setup() {
@@ -51,26 +51,26 @@ void loop() {
     command.trim();
     int commaIndex = command.indexOf(',');
     if (commaIndex > 0) {
-      int YL = command.substring(0, commaIndex).toInt();
-      int YR = command.substring(commaIndex + 1).toInt();
+      int WL = command.substring(0, commaIndex).toInt();
+      int WR = command.substring(commaIndex + 1).toInt();
       Serial.print("Received Command: ");
-      Serial.print(YL); Serial.print(", "); Serial.println(YR);
-      controlMotors(YL, YR);
+      Serial.print(WL); Serial.print(", "); Serial.println(WR);
+      controlMotors(WL, WR);
     }
   }
 }
 
 // Motor control functions (unchanged)
-void controlMotors(int YL, int YR) {
+void controlMotors(int WL, int WR) {
   // Left motor (Motor A)
-  digitalWrite(motorPin1, YL > 0 ? HIGH : LOW);
-  digitalWrite(motorPin2, YL < 0 ? HIGH : LOW);
-  analogWrite(ENA, abs(YL));
+  digitalWrite(motorPin1, WL > 0 ? HIGH : LOW);
+  digitalWrite(motorPin2, WL < 0 ? HIGH : LOW);
+  analogWrite(ENA, abs(WL));
 
   // Right motor (Motor B)
-  digitalWrite(motorPin3, YR > 0 ? HIGH : LOW);
-  digitalWrite(motorPin4, YR < 0 ? HIGH : LOW);
-  analogWrite(ENB, abs(YR));
+  digitalWrite(motorPin3, WR > 0 ? HIGH : LOW);
+  digitalWrite(motorPin4, WR < 0 ? HIGH : LOW);
+  analogWrite(ENB, abs(WR));
 }
 
 void stopMotors() {
