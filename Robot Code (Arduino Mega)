@@ -1,26 +1,44 @@
 #include <TinyGPS++.h>
+#include <SoftwareSerial.h>
+
+#define DEBUG
+
+#ifdef DEBUG
+#define DEBUG_PRINT(...) Serial.print(__VA_ARGS__)
+#define DEBUG_PRINTLN(...) Serial.println(__VA_ARGS__)
+#else
+#define DEBUG_PRINT(...)
+#define DEBUG_PRINTLN(...)
+#endif
 
 TinyGPSPlus gps;
-#define GPS_SERIAL Serial1  // GPS on Serial1 (Mega pins 18/19)
-#define ESP_SERIAL Serial3  // ESP32 connected to Mega's Serial3 (pins 14/15)
+#define GPS_SERIAL Serial1
+#define ESP_SERIAL Serial3
 
-// Motor pins (Mega pins, unchanged)
-const int ENA = 12;  // Enable pin for Motor A (PWM)
-const int ENB = 13;  // Enable pin for Motor B (PWM)
-const int motorPin1 = 8;   // Motor A direction pin 1
-const int motorPin2 = 9;   // Motor A direction pin 2
-const int motorPin3 = 11;  // Motor B direction pin 1
-const int motorPin4 = 10;  // Motor B direction pin 2
+const int ENA = 12;
+const int ENB = 13;
+const int motorPin1 = 8;
+const int motorPin2 = 9;
+const int motorPin3 = 11;
+const int motorPin4 = 10;
 
-void controlMotors(int WL, int WR);
-void stopMotors();
+struct MotorCommand {
+  int leftPWM;
+  int rightPWM;
+};
+MotorCommand currentCommand = {0, 0};
+unsigned long lastCommandTime = 0;
+const unsigned long COMMAND_TIMEOUT = 2000;
 
 void setup() {
-  Serial.begin(115200);      // Debug serial
-  GPS_SERIAL.begin(115200);  // GPS on Serial1
-  ESP_SERIAL.begin(115200);  // ESP32 on Serial3 (115200 baud)
-
-  // Initialize motor pins
+  #ifdef DEBUG
+  Serial.begin(115200);
+  while (!Serial);
+  #endif
+  
+  GPS_SERIAL.begin(9600);
+  ESP_SERIAL.begin(115200);
+  
   pinMode(ENA, OUTPUT);
   pinMode(ENB, OUTPUT);
   pinMode(motorPin1, OUTPUT);
@@ -29,48 +47,52 @@ void setup() {
   pinMode(motorPin4, OUTPUT);
   
   stopMotors();
-  Serial.println("Mega + ESP32 Initialized");
+  
+  DEBUG_PRINTLN("System Initialized - Ready for commands");
 }
 
 void loop() {
-  // Read GPS data and send to ESP32
+  handleGPS();
+  handleCommands();
+  checkTimeouts();
+  delay(20);
+}
+
+void handleGPS() {
   while (GPS_SERIAL.available() > 0) {
     if (gps.encode(GPS_SERIAL.read())) {
-      if (gps.location.isValid()) {
-        String gpsData = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6);
-        ESP_SERIAL.println(gpsData);  // Send to ESP32 via Serial3
-        Serial.print("Sent GPS Data: ");
-        Serial.println(gpsData);
+      if (gps.location.isValid() && gps.location.isUpdated()) {
+        DEBUG_PRINT("GPS Updated: ");
+        DEBUG_PRINT(gps.location.lat(), 6);
+        DEBUG_PRINT(", ");
+        DEBUG_PRINTLN(gps.location.lng(), 6);
       }
-    }
-  }
-
-  // Check for motor commands from ESP32
-  if (ESP_SERIAL.available() > 0) {
-    String command = ESP_SERIAL.readStringUntil('\n');
-    command.trim();
-    int commaIndex = command.indexOf(',');
-    if (commaIndex > 0) {
-      int WL = command.substring(0, commaIndex).toInt();
-      int WR = command.substring(commaIndex + 1).toInt();
-      Serial.print("Received Command: ");
-      Serial.print(WL); Serial.print(", "); Serial.println(WR);
-      controlMotors(WL, WR);
     }
   }
 }
 
-// Motor control functions (unchanged)
-void controlMotors(int WL, int WR) {
-  // Left motor (Motor A)
-  digitalWrite(motorPin1, WL > 0 ? HIGH : LOW);
-  digitalWrite(motorPin2, WL < 0 ? HIGH : LOW);
-  analogWrite(ENA, abs(WL));
+void handleCommands() {
+  if (ESP_SERIAL.available() > 0) {
+    String command = ESP_SERIAL.readStringUntil('\n');
+    command.trim();
+    
+    DEBUG_PRINT("Received: ");
+    DEBUG_PRINTLN(command);
 
-  // Right motor (Motor B)
-  digitalWrite(motorPin3, WR > 0 ? HIGH : LOW);
-  digitalWrite(motorPin4, WR < 0 ? HIGH : LOW);
-  analogWrite(ENB, abs(WR));
+    if (command.equals("GPS")) {
+      if (gps.location.isValid()) {
+        sendGPSData();
+      } else {
+        ESP_SERIAL.println("NO_GPS");
+      }
+    }
+    else if (command.startsWith("CMD:")) {
+      parseMotorCommand(command);
+      executeMotorCommand();
+      lastCommandTime = millis();
+      ESP_SERIAL.println("ACK");
+    }
+  }
 }
 
 void stopMotors() {
@@ -80,4 +102,40 @@ void stopMotors() {
   digitalWrite(motorPin4, LOW);
   analogWrite(ENA, 0);
   analogWrite(ENB, 0);
+}
+
+void sendGPSData() {
+  ESP_SERIAL.print(gps.location.lat(), 6);
+  ESP_SERIAL.print(",");
+  ESP_SERIAL.println(gps.location.lng(), 6);
+}
+
+bool parseMotorCommand(String command) {
+  int commaIndex = command.indexOf(',', 4);
+  if (commaIndex != -1) {
+    currentCommand.leftPWM = command.substring(4, commaIndex).toInt();
+    currentCommand.rightPWM = command.substring(commaIndex + 1).toInt();
+    return true;
+  }
+  return false;
+}
+
+void executeMotorCommand() {
+  // Left motor
+  digitalWrite(motorPin1, currentCommand.leftPWM > 0 ? LOW : HIGH);
+  digitalWrite(motorPin2, currentCommand.leftPWM > 0 ? HIGH : LOW);
+  
+  // Right motor
+  digitalWrite(motorPin3, currentCommand.rightPWM > 0 ? LOW : HIGH);
+  digitalWrite(motorPin4, currentCommand.rightPWM > 0 ? HIGH : LOW);
+  
+  analogWrite(ENA, constrain(abs(currentCommand.leftPWM) * 2.55, 0, 255));
+  analogWrite(ENB, constrain(abs(currentCommand.rightPWM) * 2.55, 0, 255));
+}
+
+void checkTimeouts() {
+  if (millis() - lastCommandTime > COMMAND_TIMEOUT) {
+    currentCommand = {0, 0};
+    stopMotors();
+  }
 }
